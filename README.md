@@ -9,13 +9,13 @@ Full-stack app:
 ### Frontend (Vercel)
 
 1. Import this repo in Vercel.
-2. Root directory: `.`
+2. Root directory: `frontend`
 3. Environment variables:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `NEXT_PUBLIC_API_BASE_URL` (your backend URL)
 
-`vercel.json` in the repo root builds the Next app from `frontend/`.
+Vercel detects Next.js from `frontend/package.json`.
 
 ### Backend (Render)
 
