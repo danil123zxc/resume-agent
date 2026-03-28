@@ -7,7 +7,64 @@ type ApiOptions = {
   headers?: Record<string, string>;
   body?: unknown;
   auth?: boolean;
+  retries?: number;
+  retryDelayMs?: number;
 };
+
+export class ApiRequestError extends Error {
+  status: number;
+  rawMessage: string;
+
+  constructor(message: string, status: number, rawMessage: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.rawMessage = rawMessage;
+  }
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractErrorMessage(text: string, status: number): string {
+  if (!text.trim()) return `Request failed: ${status}`;
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown; message?: unknown };
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) return parsed.detail;
+    if (typeof parsed.message === "string" && parsed.message.trim()) return parsed.message;
+  } catch {
+    return text;
+  }
+  return text;
+}
+
+function toFriendlyMessage(message: string, status: number): string {
+  const normalized = message.toLowerCase();
+  if (/ai service is not configured|api key required|google_api_key|gemini_api_key|invalid api key|model not found/.test(normalized)) {
+    return "AI service is not configured on the backend. Add GOOGLE_API_KEY and restart the backend server.";
+  }
+  if (/quota|resource_exhausted|rate limit|too many requests|429|gemini/.test(normalized)) {
+    return "AI service quota is currently exhausted. Please try again in a few minutes.";
+  }
+  if (/service unavailable|temporarily unavailable|timed out|timeout|deadline exceeded|overloaded/.test(normalized)) {
+    return "AI provider is temporarily unavailable. Please try again shortly.";
+  }
+  if (status === 503) {
+    return "Service is temporarily unavailable. Please try again shortly.";
+  }
+  if (status === 429) {
+    return "Too many requests right now. Please wait a moment and retry.";
+  }
+  if (status >= 500) {
+    return "Server error occurred. Please try again shortly.";
+  }
+  return message;
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 429 || status === 503 || status >= 500;
+}
 
 export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const url = `${baseUrl}${path}`;
@@ -26,22 +83,42 @@ export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promis
     body = JSON.stringify(opts.body);
   }
 
-  const res = await fetch(url, {
-    method: opts.method || "GET",
-    headers,
-    body,
-  });
+  const retries = Math.max(0, opts.retries ?? 0);
+  const retryDelayMs = Math.max(200, opts.retryDelayMs ?? 600);
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed: ${res.status}`);
-  }
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        method: opts.method || "GET",
+        headers,
+        body,
+      });
 
-  const ct = res.headers.get("content-type") || "";
-  if (ct.includes("application/json")) {
-    return (await res.json()) as T;
+      if (!res.ok) {
+        const text = await res.text();
+        const message = extractErrorMessage(text, res.status);
+        if (attempt < retries && shouldRetryStatus(res.status)) {
+          await wait(retryDelayMs * (attempt + 1));
+          continue;
+        }
+        throw new ApiRequestError(toFriendlyMessage(message, res.status), res.status, message);
+      }
+
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        return (await res.json()) as T;
+      }
+      return (await res.blob()) as unknown as T;
+    } catch (error) {
+      if (error instanceof ApiRequestError) throw error;
+      if (attempt < retries) {
+        await wait(retryDelayMs * (attempt + 1));
+        continue;
+      }
+      throw new Error("Network issue while contacting the server. Please retry.");
+    }
   }
-  return (await res.blob()) as unknown as T;
+  throw new Error("Request failed");
 }
 
 export function downloadBlob(blob: Blob, filename: string) {
@@ -54,4 +131,3 @@ export function downloadBlob(blob: Blob, filename: string) {
   a.remove();
   URL.revokeObjectURL(url);
 }
-

@@ -33,6 +33,8 @@ class OptimizeRequest(BaseModel):
 class OptimizeResponse(BaseModel):
     optimizedResumeText: str
     extractedKeywords: list[str] = []
+    pdfBase64: str = ""
+    pdfFilename: str = "optimized_resume.pdf"
 
 
 class PdfRequest(BaseModel):
