@@ -1,6 +1,6 @@
 import { useAuthStore } from "./store";
 
-const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+const configuredBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
 type ApiOptions = {
   method?: string;
@@ -66,8 +66,25 @@ function shouldRetryStatus(status: number): boolean {
   return status === 429 || status === 503 || status >= 500;
 }
 
+function resolveBaseUrl(): string {
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.replace(/\/+$/, "");
+  }
+  if (typeof window !== "undefined") {
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return "http://localhost:8000";
+    }
+    throw new Error("API base URL is not configured. Set NEXT_PUBLIC_API_BASE_URL in the frontend deployment settings.");
+  }
+  return "http://localhost:8000";
+}
+
+export function buildApiUrl(path: string): string {
+  return `${resolveBaseUrl()}${path}`;
+}
+
 export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promise<T> {
-  const url = `${baseUrl}${path}`;
+  const url = buildApiUrl(path);
   const headers: Record<string, string> = {
     ...(opts.headers || {}),
   };
@@ -79,8 +96,14 @@ export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promis
 
   let body: BodyInit | undefined;
   if (opts.body !== undefined) {
-    headers["Content-Type"] = headers["Content-Type"] || "application/json";
-    body = JSON.stringify(opts.body);
+    if (typeof FormData !== "undefined" && opts.body instanceof FormData) {
+      body = opts.body;
+    } else if (typeof opts.body === "string") {
+      body = opts.body;
+    } else {
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+      body = JSON.stringify(opts.body);
+    }
   }
 
   const retries = Math.max(0, opts.retries ?? 0);
@@ -111,6 +134,7 @@ export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promis
       return (await res.blob()) as unknown as T;
     } catch (error) {
       if (error instanceof ApiRequestError) throw error;
+      if (error instanceof Error && /API base URL is not configured/.test(error.message)) throw error;
       if (attempt < retries) {
         await wait(retryDelayMs * (attempt + 1));
         continue;

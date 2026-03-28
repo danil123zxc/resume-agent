@@ -124,12 +124,12 @@ export default function DashboardWizard({ step }: { step: Step }) {
     setLoading("parse");
     setError(null);
     try {
-      const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch(`${base}/api/resumes/parse`, { method: "POST", body: form });
-      if (!res.ok) throw new Error(await res.text());
-      const data = (await res.json()) as { resumeText: string };
+      const data = await apiRequest<{ resumeText: string }>("/api/resumes/parse", {
+        method: "POST",
+        body: form,
+      });
       updateWizard({ resumeText: data.resumeText });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to parse resume");
