@@ -11,6 +11,8 @@ type Step = 1 | 2 | 3 | 4;
 type OptimizeResponse = {
   optimizedResumeText: string;
   extractedKeywords: string[];
+  pdfBase64: string;
+  pdfFilename: string;
 };
 
 type JobPost = {
@@ -35,6 +37,15 @@ const stepPath: Record<Step, string> = {
   3: "/dashboard/options",
   4: "/dashboard/result",
 };
+
+function base64ToPdfBlob(base64: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: "application/pdf" });
+}
 
 function StepPill({
   label,
@@ -87,6 +98,7 @@ export default function DashboardWizard({ step }: { step: Step }) {
 
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [optimizedPdf, setOptimizedPdf] = useState<{ base64: string; filename: string; sourceText: string } | null>(null);
 
   function goToStep(targetStep: Step) {
     router.push(stepPath[targetStep]);
@@ -151,6 +163,15 @@ export default function DashboardWizard({ step }: { step: Step }) {
         optimizedText: res.optimizedResumeText,
         keywords: res.extractedKeywords || [],
       });
+      setOptimizedPdf(
+        res.pdfBase64
+          ? {
+              base64: res.pdfBase64,
+              filename: res.pdfFilename || "optimized_resume.pdf",
+              sourceText: res.optimizedResumeText,
+            }
+          : null,
+      );
       goToStep(4);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Optimization failed");
@@ -163,6 +184,10 @@ export default function DashboardWizard({ step }: { step: Step }) {
     setLoading("pdf");
     setError(null);
     try {
+      if (optimizedPdf && optimizedPdf.base64 && optimizedPdf.sourceText === optimizedText) {
+        downloadBlob(base64ToPdfBlob(optimizedPdf.base64), optimizedPdf.filename || `${resumeTitle || "resume"}.pdf`);
+        return;
+      }
       const blob = await apiRequest<Blob>("/api/analyze/pdf", {
         method: "POST",
         body: { title: resumeTitle, content: optimizedText },
