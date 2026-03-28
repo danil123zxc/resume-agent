@@ -1,4 +1,5 @@
 import { useAuthStore } from "./store";
+import { supabase } from "./supabase";
 
 const configuredBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 
@@ -66,6 +67,11 @@ function shouldRetryStatus(status: number): boolean {
   return status === 429 || status === 503 || status >= 500;
 }
 
+async function handleUnauthorizedResponse(): Promise<never> {
+  await supabase.auth.signOut();
+  throw new ApiRequestError("Session expired. Please sign in again.", 401, "Unauthorized");
+}
+
 function resolveBaseUrl(): string {
   if (configuredBaseUrl) {
     return configuredBaseUrl.replace(/\/+$/, "");
@@ -74,13 +80,15 @@ function resolveBaseUrl(): string {
     if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
       return "http://localhost:8000";
     }
-    throw new Error("API base URL is not configured. Set NEXT_PUBLIC_API_BASE_URL in the frontend deployment settings.");
+    return "";
   }
   return "http://localhost:8000";
 }
 
 export function buildApiUrl(path: string): string {
-  return `${resolveBaseUrl()}${path}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const baseUrl = resolveBaseUrl();
+  return baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
 }
 
 export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promise<T> {
@@ -120,6 +128,9 @@ export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promis
       if (!res.ok) {
         const text = await res.text();
         const message = extractErrorMessage(text, res.status);
+        if (res.status === 401) {
+          await handleUnauthorizedResponse();
+        }
         if (attempt < retries && shouldRetryStatus(res.status)) {
           await wait(retryDelayMs * (attempt + 1));
           continue;
@@ -139,8 +150,13 @@ export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promis
         await wait(retryDelayMs * (attempt + 1));
         continue;
       }
-      const apiOrigin = new URL(url).origin;
-      throw new Error(`Network issue while contacting ${apiOrigin}. Check CORS and NEXT_PUBLIC_API_BASE_URL.`);
+      let apiOrigin = "the server";
+      if (/^https?:\/\//.test(url)) {
+        apiOrigin = new URL(url).origin;
+      } else if (typeof window !== "undefined") {
+        apiOrigin = window.location.origin;
+      }
+      throw new Error(`Network issue while contacting ${apiOrigin}. Check server availability and API proxy configuration.`);
     }
   }
   throw new Error("Request failed");

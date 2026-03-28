@@ -62,19 +62,34 @@ export default function LibraryPage() {
 
   async function deleteJob(id: string) {
     if (!confirm("Delete this job post?")) return;
-    await apiRequest<{ status: string }>(`/api/jobs/${id}`, { method: "DELETE", auth: true });
-    await refresh();
+    setError(null);
+    try {
+      await apiRequest<{ status: string }>(`/api/jobs/${id}`, { method: "DELETE", auth: true });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete job post");
+    }
   }
 
   async function deleteResume(id: string) {
     if (!confirm("Delete this resume?")) return;
-    await apiRequest<{ status: string }>(`/api/resumes/${id}`, { method: "DELETE", auth: true });
-    await refresh();
+    setError(null);
+    try {
+      await apiRequest<{ status: string }>(`/api/resumes/${id}`, { method: "DELETE", auth: true });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete resume");
+    }
   }
 
   async function downloadResume(id: string, title: string) {
-    const blob = await apiRequest<Blob>(`/api/resumes/${id}/pdf`, { auth: true });
-    downloadBlob(blob, `${title || "resume"}.pdf`);
+    setError(null);
+    try {
+      const blob = await apiRequest<Blob>(`/api/resumes/${id}/pdf`, { auth: true });
+      downloadBlob(blob, `${title || "resume"}.pdf`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to download resume");
+    }
   }
 
   return (
@@ -184,4 +199,3 @@ export default function LibraryPage() {
     </div>
   );
 }
-
