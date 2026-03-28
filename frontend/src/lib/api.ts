@@ -73,14 +73,17 @@ async function handleUnauthorizedResponse(): Promise<never> {
 }
 
 function resolveBaseUrl(): string {
-  if (configuredBaseUrl) {
-    return configuredBaseUrl.replace(/\/+$/, "");
-  }
   if (typeof window !== "undefined") {
     if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      if (configuredBaseUrl) {
+        return configuredBaseUrl.replace(/\/+$/, "");
+      }
       return "http://localhost:8000";
     }
     return "";
+  }
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.replace(/\/+$/, "");
   }
   return "http://localhost:8000";
 }

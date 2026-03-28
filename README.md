@@ -13,7 +13,8 @@ Full-stack app:
 3. Environment variables:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `NEXT_PUBLIC_API_BASE_URL` (your backend URL, must be `https://...`)
+   - `API_BASE_URL` (your backend URL, must be `https://...`)
+   - Optional local-dev override: `NEXT_PUBLIC_API_BASE_URL`
 
 Vercel detects Next.js from `frontend/package.json`.
 
