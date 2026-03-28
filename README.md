@@ -32,6 +32,21 @@ This repo includes a Render Blueprint: `render.yaml`.
 Optional:
 - `GEMINI_MODEL` (defaults to `gemini-2.5-pro`)
 
+### Backend (Vercel, serverless)
+
+Not recommended for heavy workloads, but supported.
+
+1. Create a second Vercel project from the same GitHub repo.
+2. Root directory: `backend`
+3. Environment variables:
+   - `GOOGLE_API_KEY`
+   - `SUPABASE_URL` = `https://xolgohvlvkjzszycudyl.supabase.co`
+   - `SUPABASE_ANON_KEY` = Supabase anon public key
+   - `FRONTEND_ORIGIN` = your frontend Vercel URL
+   - Optional: `GEMINI_MODEL` = `gemini-2.5-pro`
+
+The entrypoint is `backend/api/index.py` and routes are defined in `backend/vercel.json`.
+
 ## Local dev
 
 Frontend:
