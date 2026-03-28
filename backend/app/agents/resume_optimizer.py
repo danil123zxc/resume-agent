@@ -1,41 +1,42 @@
-from typing import TypedDict
-
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import END, StateGraph
+from langchain.agents import create_agent
+from langchain_core.messages import AIMessage, HumanMessage
 
 from app.services.llm import get_llm
 
 
-class ResumeState(TypedDict, total=False):
-    job_post_text: str
-    resume_text: str
-    mode: str
-    tone: str
-    length: str
-    optimized_resume_text: str
-    extracted_keywords: list[str]
+async def _run_text_agent(*, system_prompt: str, prompt: str) -> str:
+    agent = create_agent(model=get_llm(), tools=[], system_prompt=system_prompt)
+    result = await agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
+    messages = result.get("messages", [])
+    ai_messages = [msg for msg in messages if isinstance(msg, AIMessage)]
+    if not ai_messages:
+        return ""
+    content = ai_messages[-1].content
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        text_parts = [part.get("text", "") for part in content if isinstance(part, dict)]
+        return "\n".join(p for p in text_parts if p).strip()
+    return str(content).strip()
 
 
-async def _extract_keywords(state: ResumeState) -> ResumeState:
+async def extract_keywords(job_post_text: str) -> list[str]:
     llm = get_llm()
     prompt = (
         "Extract 15-25 ATS-friendly resume keywords from this job posting. "
         "Return ONLY a comma-separated list of keywords, no extra text.\n\n"
-        f"JOB POSTING:\n{state['job_post_text']}"
+        f"JOB POSTING:\n{job_post_text}"
     )
     msg = await llm.ainvoke([HumanMessage(content=prompt)])
     raw = (msg.content or "").strip()
     keywords = [k.strip() for k in raw.split(",") if k.strip()]
-    return {"extracted_keywords": keywords[:30]}
+    return keywords[:30]
 
 
-async def _rewrite_resume(state: ResumeState) -> ResumeState:
-    llm = get_llm()
-
-    mode = state.get("mode", "optimize")
-    tone = state.get("tone", "balanced")
-    length = state.get("length", "1page")
-    resume_text = state.get("resume_text", "").strip()
+async def rewrite_resume_with_agent(
+    *, job_post_text: str, resume_text: str, mode: str, tone: str, length: str
+) -> str:
+    current_resume_text = resume_text.strip()
 
     system = (
         "You are an expert resume writer. "
@@ -44,7 +45,7 @@ async def _rewrite_resume(state: ResumeState) -> ResumeState:
         "Output must be plain text, ATS-friendly, with clear section headings."
     )
 
-    if mode == "generate" or not resume_text:
+    if mode == "generate" or not current_resume_text:
         instruction = (
             "Create a new resume from scratch tailored to the job posting. "
             "Use this structure: SUMMARY, SKILLS, EXPERIENCE, PROJECTS, EDUCATION. "
@@ -59,26 +60,12 @@ async def _rewrite_resume(state: ResumeState) -> ResumeState:
             "Improve bullet points using action verbs and quantified impact placeholders when needed. "
             f"Tone: {tone}. Target length: {length}."
         )
-        source = resume_text
+        source = current_resume_text
 
-    human = (
+    prompt = (
         f"{instruction}\n\n"
-        f"JOB POSTING:\n{state['job_post_text']}\n\n"
+        f"JOB POSTING:\n{job_post_text}\n\n"
         f"SOURCE RESUME:\n{source}\n"
     )
 
-    msg = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=human)])
-    optimized = (msg.content or "").strip()
-    return {"optimized_resume_text": optimized}
-
-
-def build_resume_optimizer_graph():
-    graph = StateGraph(ResumeState)
-    graph.add_node("extract_keywords", _extract_keywords)
-    graph.add_node("rewrite_resume", _rewrite_resume)
-
-    graph.set_entry_point("extract_keywords")
-    graph.add_edge("extract_keywords", "rewrite_resume")
-    graph.add_edge("rewrite_resume", END)
-    return graph.compile()
-
+    return await _run_text_agent(system_prompt=system, prompt=prompt)
