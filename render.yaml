@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: jobhunt-ai-backend
+    runtime: docker
+    rootDir: backend
+    plan: starter
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-pro
+      - key: SUPABASE_URL
+        value: https://xolgohvlvkjzszycudyl.supabase.co
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
