@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_anon_key: str
     frontend_origin: str = "http://localhost:3000"
+    frontend_origin_regex: str | None = None
 
 
 settings = Settings()

@@ -139,7 +139,8 @@ export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promis
         await wait(retryDelayMs * (attempt + 1));
         continue;
       }
-      throw new Error("Network issue while contacting the server. Please retry.");
+      const apiOrigin = new URL(url).origin;
+      throw new Error(`Network issue while contacting ${apiOrigin}. Check CORS and NEXT_PUBLIC_API_BASE_URL.`);
     }
   }
   throw new Error("Request failed");
