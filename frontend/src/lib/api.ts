@@ -28,16 +28,23 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function extractErrorMessage(text: string, status: number): string {
-  if (!text.trim()) return `Request failed: ${status}`;
+function extractErrorMessage(text: string, status: number, contentType: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return `Request failed: ${status}`;
+  if (contentType.includes("text/html") || /^<!doctype html/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) {
+    if (status === 404) {
+      return "API endpoint was not found. Check API_BASE_URL points to the backend service.";
+    }
+    return `Request failed: ${status}`;
+  }
   try {
-    const parsed = JSON.parse(text) as { detail?: unknown; message?: unknown };
+    const parsed = JSON.parse(trimmed) as { detail?: unknown; message?: unknown };
     if (typeof parsed.detail === "string" && parsed.detail.trim()) return parsed.detail;
     if (typeof parsed.message === "string" && parsed.message.trim()) return parsed.message;
   } catch {
-    return text;
+    return trimmed.slice(0, 300);
   }
-  return text;
+  return trimmed.slice(0, 300);
 }
 
 function toFriendlyMessage(message: string, status: number): string {
@@ -130,7 +137,8 @@ export async function apiRequest<T>(path: string, opts: ApiOptions = {}): Promis
 
       if (!res.ok) {
         const text = await res.text();
-        const message = extractErrorMessage(text, res.status);
+        const contentType = res.headers.get("content-type") || "";
+        const message = extractErrorMessage(text, res.status, contentType.toLowerCase());
         if (res.status === 401) {
           await handleUnauthorizedResponse();
         }
