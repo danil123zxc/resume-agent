@@ -94,13 +94,28 @@ async def optimize_resume(payload: OptimizeRequest) -> OptimizeResponse:
             )
         raise HTTPException(status_code=500, detail="Failed to optimize resume due to an internal server error.")
 
+    optimized_text = ""
+    extracted_keywords: list[str] = []
+    if isinstance(result, dict):
+        optimized_text = str(result.get("optimized_resume_text", "") or "")
+        raw_keywords = result.get("extracted_keywords", [])
+        if isinstance(raw_keywords, list):
+            extracted_keywords = [str(keyword).strip() for keyword in raw_keywords if str(keyword).strip()]
+
+    pdf_base64 = ""
+    pdf_filename = ""
+    try:
+        pdf_base64 = base64.b64encode(build_resume_pdf(title="Optimized Resume", content=optimized_text)).decode("utf-8")
+        pdf_filename = "optimized_resume.pdf"
+    except Exception:
+        pdf_base64 = ""
+        pdf_filename = ""
+
     return OptimizeResponse(
-        optimizedResumeText=result.get("optimized_resume_text", ""),
-        extractedKeywords=result.get("extracted_keywords", []),
-        pdfBase64=base64.b64encode(
-            build_resume_pdf(title="Optimized Resume", content=result.get("optimized_resume_text", ""))
-        ).decode("utf-8"),
-        pdfFilename="optimized_resume.pdf",
+        optimizedResumeText=optimized_text,
+        extractedKeywords=extracted_keywords,
+        pdfBase64=pdf_base64,
+        pdfFilename=pdf_filename,
     )
 
 
