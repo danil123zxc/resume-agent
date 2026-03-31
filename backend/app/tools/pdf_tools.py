@@ -42,6 +42,15 @@ def _to_latin_fallback(text: str) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
+def _usable_width(pdf: FPDF) -> float:
+    return float(getattr(pdf, "epw", pdf.w - pdf.l_margin - pdf.r_margin))
+
+
+def _write_line(pdf: FPDF, *, line_height: int, text: str) -> None:
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(w=_usable_width(pdf), h=line_height, txt=text, new_x="LMARGIN", new_y="NEXT")
+
+
 def build_resume_pdf(*, title: str, content: str) -> bytes:
     pdf = FPDF(unit="pt", format="Letter")
     pdf.set_auto_page_break(auto=True, margin=48)
@@ -49,7 +58,7 @@ def build_resume_pdf(*, title: str, content: str) -> bytes:
 
     supports_unicode = _set_pdf_font(pdf, size=16, emphasize=True)
     title_text = title.strip() or "Resume"
-    pdf.multi_cell(w=0, h=22, txt=title_text if supports_unicode else _to_latin_fallback(title_text))
+    _write_line(pdf, line_height=22, text=title_text if supports_unicode else _to_latin_fallback(title_text))
     pdf.ln(10)
 
     supports_unicode = _set_pdf_font(pdf, size=11)
@@ -58,7 +67,7 @@ def build_resume_pdf(*, title: str, content: str) -> bytes:
         if not txt.strip():
             pdf.ln(8)
             continue
-        pdf.multi_cell(w=0, h=16, txt=txt if supports_unicode else _to_latin_fallback(txt))
+        _write_line(pdf, line_height=16, text=txt if supports_unicode else _to_latin_fallback(txt))
 
     buffer = BytesIO()
     pdf.output(buffer)
