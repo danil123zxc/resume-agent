@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { apiRequest, downloadBlob } from "@/lib/api";
@@ -21,6 +21,7 @@ type JobPost = {
   company: string | null;
   url: string | null;
   description: string;
+  updated_at?: string;
 };
 
 type Resume = {
@@ -29,6 +30,7 @@ type Resume = {
   job_post_id: string | null;
   source_text: string;
   optimized_text: string;
+  updated_at?: string;
 };
 
 const stepPath: Record<Step, string> = {
@@ -98,7 +100,61 @@ export default function DashboardWizard({ step }: { step: Step }) {
 
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [optimizedPdf, setOptimizedPdf] = useState<{ base64: string; filename: string; sourceText: string } | null>(null);
+  const [, setOptimizedPdf] = useState<{ base64: string; filename: string; sourceText: string } | null>(null);
+  const [savedJobs, setSavedJobs] = useState<JobPost[]>([]);
+  const [selectedSavedJobId, setSelectedSavedJobId] = useState("");
+  const [loadingSavedJobs, setLoadingSavedJobs] = useState(false);
+  const [savedResumes, setSavedResumes] = useState<Resume[]>([]);
+  const [selectedSavedResumeId, setSelectedSavedResumeId] = useState("");
+  const [loadingSavedResumes, setLoadingSavedResumes] = useState(false);
+
+  const loadSavedJobs = useCallback(async () => {
+    if (!user) return;
+    setLoadingSavedJobs(true);
+    try {
+      const jobs = await apiRequest<JobPost[]>("/api/jobs", { auth: true });
+      setSavedJobs(jobs);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load saved job posts");
+    } finally {
+      setLoadingSavedJobs(false);
+    }
+  }, [user]);
+
+  const loadSavedResumes = useCallback(async () => {
+    if (!user) return;
+    setLoadingSavedResumes(true);
+    try {
+      const resumes = await apiRequest<Resume[]>("/api/resumes", { auth: true });
+      setSavedResumes(resumes);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load saved resumes");
+    } finally {
+      setLoadingSavedResumes(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setSavedJobs([]);
+      setSelectedSavedJobId("");
+      setSavedResumes([]);
+      setSelectedSavedResumeId("");
+      return;
+    }
+    loadSavedJobs();
+    loadSavedResumes();
+  }, [loadSavedJobs, loadSavedResumes, user]);
+
+  useEffect(() => {
+    if (!savedJob?.id) return;
+    setSelectedSavedJobId(savedJob.id);
+  }, [savedJob?.id]);
+
+  useEffect(() => {
+    if (!savedResume?.id) return;
+    setSelectedSavedResumeId(savedResume.id);
+  }, [savedResume?.id]);
 
   function goToStep(targetStep: Step) {
     router.push(stepPath[targetStep]);
@@ -184,15 +240,35 @@ export default function DashboardWizard({ step }: { step: Step }) {
     setLoading("pdf");
     setError(null);
     try {
-      if (optimizedPdf && optimizedPdf.base64 && optimizedPdf.sourceText === optimizedText) {
-        downloadBlob(base64ToPdfBlob(optimizedPdf.base64), optimizedPdf.filename || `${resumeTitle || "resume"}.pdf`);
-        return;
+      const trimmedJobText = jobText.trim();
+      if (trimmedJobText.length < 20) {
+        throw new Error("Job description is too short. Please add at least 20 characters to generate PDF with AI.");
       }
-      const blob = await apiRequest<Blob>("/api/analyze/pdf", {
+      const agentRes = await apiRequest<OptimizeResponse>("/api/analyze/optimize", {
         method: "POST",
-        body: { title: resumeTitle, content: optimizedText },
+        retries: 1,
+        retryDelayMs: 800,
+        body: {
+          jobPostText: trimmedJobText,
+          resumeText: optimizedText,
+          mode: "optimize",
+          options: { tone, length },
+        },
       });
-      downloadBlob(blob, `${resumeTitle || "resume"}.pdf`);
+      updateWizard({
+        optimizedText: agentRes.optimizedResumeText,
+        keywords: agentRes.extractedKeywords || [],
+      });
+      if (!agentRes.pdfBase64) {
+        throw new Error("AI returned no PDF file. Please try again.");
+      }
+      const filename = agentRes.pdfFilename || `${resumeTitle || "resume"}.pdf`;
+      setOptimizedPdf({
+        base64: agentRes.pdfBase64,
+        filename,
+        sourceText: agentRes.optimizedResumeText,
+      });
+      downloadBlob(base64ToPdfBlob(agentRes.pdfBase64), filename);
     } catch (e) {
       setError(e instanceof Error ? e.message : "PDF generation failed");
     } finally {
@@ -214,11 +290,62 @@ export default function DashboardWizard({ step }: { step: Step }) {
         body: { title: jobTitle || "Job Post", company: jobCompany || null, url: jobUrl || null, description: jobText },
       });
       updateWizard({ savedJob: res });
+      setSavedJobs((prev) => [res, ...prev.filter((job) => job.id !== res.id)]);
+      setSelectedSavedJobId(res.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save job post");
     } finally {
       setLoading(null);
     }
+  }
+
+  function onSelectSavedJob(jobId: string) {
+    setSelectedSavedJobId(jobId);
+    if (!jobId) return;
+    const selectedJob = savedJobs.find((job) => job.id === jobId);
+    if (!selectedJob) return;
+    setError(null);
+    updateWizard({
+      jobTitle: selectedJob.title || "",
+      jobCompany: selectedJob.company || "",
+      jobUrl: selectedJob.url || "",
+      jobText: selectedJob.description || "",
+      savedJob: selectedJob,
+      optimizedText: "",
+      keywords: [],
+      savedResume: null,
+    });
+    setOptimizedPdf(null);
+  }
+
+  function onSelectSavedResume(resumeId: string) {
+    setSelectedSavedResumeId(resumeId);
+    if (!resumeId) return;
+    const selectedResume = savedResumes.find((resume) => resume.id === resumeId);
+    if (!selectedResume) return;
+    setError(null);
+    if (selectedResume.job_post_id) {
+      const relatedJob = savedJobs.find((job) => job.id === selectedResume.job_post_id);
+      if (relatedJob) {
+        setSelectedSavedJobId(relatedJob.id);
+        updateWizard({
+          jobTitle: relatedJob.title || "",
+          jobCompany: relatedJob.company || "",
+          jobUrl: relatedJob.url || "",
+          jobText: relatedJob.description || "",
+          savedJob: relatedJob,
+        });
+      }
+    }
+    updateWizard({
+      resumeMode: "upload",
+      resumeTitle: selectedResume.title || "Resume",
+      resumeText: selectedResume.source_text || selectedResume.optimized_text || "",
+      optimizedText: "",
+      keywords: [],
+      savedResume: selectedResume,
+    });
+    setOptimizedPdf(null);
   }
 
   async function onSaveResume() {
@@ -240,6 +367,8 @@ export default function DashboardWizard({ step }: { step: Step }) {
         },
       });
       updateWizard({ savedResume: res });
+      setSavedResumes((prev) => [res, ...prev.filter((resume) => resume.id !== res.id)]);
+      setSelectedSavedResumeId(res.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save resume");
     } finally {
@@ -280,6 +409,29 @@ export default function DashboardWizard({ step }: { step: Step }) {
           </div>
 
           <div className="mt-4 grid gap-3">
+            {user ? (
+              <div className="grid md:grid-cols-[1fr_auto] gap-2">
+                <select
+                  value={selectedSavedJobId}
+                  onChange={(e) => onSelectSavedJob(e.target.value)}
+                  className="px-3 py-2 rounded-xl bg-black/20 border border-white/10 outline-none focus:ring-2 focus:ring-[#6D5EF6]/60 text-sm"
+                >
+                  <option value="">저장된 채용공고 선택</option>
+                  {savedJobs.map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {job.company ? `${job.title} · ${job.company}` : job.title}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={loadSavedJobs}
+                  disabled={loadingSavedJobs}
+                  className="px-3 py-2 rounded-xl text-xs bg-white/10 hover:bg-white/15 disabled:opacity-40 transition"
+                >
+                  {loadingSavedJobs ? "불러오는중..." : "목록 새로고침"}
+                </button>
+              </div>
+            ) : null}
             <div className="grid md:grid-cols-2 gap-3">
               <input
                 value={jobTitle}
@@ -358,6 +510,29 @@ export default function DashboardWizard({ step }: { step: Step }) {
           </div>
 
           <div className="mt-4 grid gap-3">
+            {user ? (
+              <div className="grid md:grid-cols-[1fr_auto] gap-2">
+                <select
+                  value={selectedSavedResumeId}
+                  onChange={(e) => onSelectSavedResume(e.target.value)}
+                  className="px-3 py-2 rounded-xl bg-black/20 border border-white/10 outline-none focus:ring-2 focus:ring-[#6D5EF6]/60 text-sm"
+                >
+                  <option value="">저장된 이력서 선택</option>
+                  {savedResumes.map((resume) => (
+                    <option key={resume.id} value={resume.id}>
+                      {resume.title}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={loadSavedResumes}
+                  disabled={loadingSavedResumes}
+                  className="px-3 py-2 rounded-xl text-xs bg-white/10 hover:bg-white/15 disabled:opacity-40 transition"
+                >
+                  {loadingSavedResumes ? "불러오는중..." : "목록 새로고침"}
+                </button>
+              </div>
+            ) : null}
             <div className="flex gap-2">
               <button
                 onClick={() => updateWizard({ resumeMode: "upload" })}
@@ -494,7 +669,7 @@ export default function DashboardWizard({ step }: { step: Step }) {
                   onClick={onDownloadPdf}
                   className="px-3 py-2 rounded-xl text-xs bg-white/10 hover:bg-white/15 disabled:opacity-40 transition"
                 >
-                  {loading === "pdf" ? "생성중..." : "PDF 다운로드"}
+                  {loading === "pdf" ? "생성중..." : "PDF 생성"}
                 </button>
                 <button
                   disabled={!optimizedText.trim() || loading !== null}
