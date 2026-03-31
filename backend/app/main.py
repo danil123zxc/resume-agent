@@ -10,11 +10,12 @@ from app.routers.resumes import router as resumes_router
 app = FastAPI(title="JobHunt AI API")
 
 allowed_origins = [origin.strip() for origin in settings.frontend_origin.split(",") if origin.strip()]
+allowed_origin_regex = settings.frontend_origin_regex or r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins or ["http://localhost:3000"],
-    allow_origin_regex=settings.frontend_origin_regex,
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"] ,
     allow_headers=["*"],

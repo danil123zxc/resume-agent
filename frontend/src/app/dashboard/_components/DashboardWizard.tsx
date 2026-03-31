@@ -259,16 +259,24 @@ export default function DashboardWizard({ step }: { step: Step }) {
         optimizedText: agentRes.optimizedResumeText,
         keywords: agentRes.extractedKeywords || [],
       });
-      if (!agentRes.pdfBase64) {
-        throw new Error("AI returned no PDF file. Please try again.");
-      }
       const filename = agentRes.pdfFilename || `${resumeTitle || "resume"}.pdf`;
-      setOptimizedPdf({
-        base64: agentRes.pdfBase64,
-        filename,
-        sourceText: agentRes.optimizedResumeText,
+      if (agentRes.pdfBase64) {
+        setOptimizedPdf({
+          base64: agentRes.pdfBase64,
+          filename,
+          sourceText: agentRes.optimizedResumeText,
+        });
+        downloadBlob(base64ToPdfBlob(agentRes.pdfBase64), filename);
+        return;
+      }
+      const pdfBlob = await apiRequest<Blob>("/api/analyze/pdf", {
+        method: "POST",
+        body: {
+          title: (resumeTitle || "resume").trim() || "resume",
+          content: agentRes.optimizedResumeText || optimizedText,
+        },
       });
-      downloadBlob(base64ToPdfBlob(agentRes.pdfBase64), filename);
+      downloadBlob(pdfBlob, filename);
     } catch (e) {
       setError(e instanceof Error ? e.message : "PDF generation failed");
     } finally {
